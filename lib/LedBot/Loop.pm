@@ -5,8 +5,6 @@ package LedBot::Loop;
 # use with care!
 # things in the loop get called very often and very fast
 
-# yes!
-
 use strict;
 
 sub new {
