@@ -1,0 +1,28 @@
+my $inquote = 0;
+foreach my $key (split(/\s+/, $data)) {
+	unless($inquote) {
+		if($key =~ /^(["'])/ && $key !~ /[^\\]$1$/) {
+			$inquote = 1;
+		}
+
+		push(@ARGV, $key);
+	} else {
+		if($key =~ /[^\\]['"]$/) {
+			$inquote = 0;
+		}
+
+		$ARGV[-1] .= ' ' . $key;
+	}
+}
+
+# clean out \["']'s
+foreach(@ARGV) {
+	s/^["'](.*)['"]$/$1/ig;
+	s/[^\\](['"])/$1/g; #"'
+}
+
+if($inquote) {
+	qmsg($chan, "No ending quote! Can't compute data!!");
+
+	return;
+}
