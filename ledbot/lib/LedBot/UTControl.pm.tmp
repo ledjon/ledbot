@@ -1,0 +1,298 @@
+package LedBot::UTControl;
+
+use strict;
+use LedBot::Special qw(getopts shellwords execute);
+
+my $utctl = '/home/ledjon/perl/ut/utctl.pl';
+my ($server, $user, $pass) = ( );
+
+-x $utctl or die "Cannot execute $utctl: $!\n";
+
+main->addcmd('ut', \&handler, 'utctl');
+main->addcmd('ut-setserver', \&server_handler, 'ut-set');
+main->addcmd('ut-unset', \&server_unset);
+
+my %events = (
+	'current_game'  => \&current_game,
+	'list_maps'     => \&list_maps,
+	'search_maps'	=> \&map_search,
+	'list_types'    => \&list_types,
+	'change_map'    => \&change_map,
+	'change_type'   => \&change_type,
+	'restart_level'	=> \&restart_level,
+	'say'		=> \&say
+);
+
+sub handler {
+	my ($self, $event, $chan, $data, @to) = @_;
+	
+	unless($server and $user and $pass) {
+		main->qmsg($chan, "You need to set server control first (" . main->trigger . "ut-setserver)");
+		return;
+	}
+	
+	local @ARGV = shellwords($data);
+	getopts('a:m:t:p', \my %opts);
+	
+	my $e = $opts{'a'} || shift @ARGV;
+	$e =~ s/-/_/g;
+	
+	if(defined $events{$e}) {
+		return $events{$e}->(\%opts, @_);
+	} else {
+		main->qmsg($chan, "Usage: " . main->trigger . 'ut ' .
+				'[ ' . join(' | ', keys %events) . ' ] [-options]');
+	}
+}
+
+sub server_handler {
+	my ($self, $event, $chan, $data, @to) = @_;
+
+	return unless main->can_access($event->userhost);
+
+	my @in = split(/\s+/, $data, 3);
+
+	if(@in != 3) {
+		main->qmsg($chan, "Usage; " . main->trigger . "ut-setserver x.x.x.x:xxxx user pass");
+		return;
+	}
+
+	($server, $user, $pass) = @in;
+
+	main->qmsg($chan, "Now controlling [$server]");
+}
+
+sub server_unset {
+	my ($self, $event, $chan, $data, @to) = @_;
+	
+	return unless main->can_access($event->userhost);
+	
+	$server = $user = $pass = undef;
+	
+	main->qmsg($chan, "Server reset to none.");
+}
+
+sub current_game {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;
+	
+	my @lines = _execute('-a', 'current_game');
+	chomp(@lines);
+	
+	if($? > 0) {
+		main->qmsg($chan, "Some error occured (@lines) ($?)");
+		return;
+	}
+	
+	unless(scalar @lines) {
+		main->qmsg($chan, "No map / type playing?");
+		return;
+	}
+	
+	for my $l (@lines) {
+		main->qmsg($chan, $l);
+	}
+}
+
+sub list_maps {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;
+	
+	my $to = ($opts->{'p'} ? $event->nick : $chan);
+	
+	my @lines = _execute('-a', 'list_maps');
+	chomp(@lines);
+	
+	if($? > 0) {
+		main->qmsg($to, "Some error occured (@lines) ($?)");
+		return;
+	}
+	
+	unless(scalar @lines) {
+		main->qmsg($to, "No maps for current game type?");
+		return;
+	}
+	
+	main->qmsg($to, "Map List:");
+	for my $l (@lines) {
+		my ($f, $n) = split(/:\s+/, $l, 2);
+		main->qmsg($to, "$n [$f]");
+	}
+}
+
+sub map_search {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;
+	
+	my $to = ($opts->{'p'} ? $event->nick : $chan);
+	
+	my $term = shift @ARGV;
+	
+	if(!$term) {
+		main->qmsg($to, "Need search term!");
+	}
+	
+	my @lines = grep { /\Q$term\E/i; } _execute('-a', 'list_maps');
+	chomp(@lines);
+	
+	if($? > 0) {
+		main->qmsg($to, "Some error occured (@lines) ($?)");
+		return;
+	}
+	
+	unless(scalar @lines) {
+		main->qmsg($to, "No maps matched search term ($term)");
+		return;
+	}
+	
+	main->qmsg($to, "Map List [$term]:");
+	for my $l (@lines) {
+		my ($f, $n) = split(/:\s+/, $l, 2);
+		main->qmsg($to, "$n [$f]");
+	}
+}
+
+sub list_types {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;
+	
+	my @lines = _execute('-a', 'list_types');
+	chomp(@lines);
+	
+	if($? > 0) {
+		main->qmsg($chan, "Some error occured (@lines) ($?)");
+		return;
+	}
+	
+	unless(scalar @lines) {
+		main->qmsg($chan, "No types?");
+		return;
+	}
+	
+	main->qmsg($chan, "Type List:");
+	for my $l (@lines) {
+		my ($f, $n) = split(/:\s+/, $l, 2);
+		main->qmsg($chan, $n . ' [' . $f . ']');
+	}
+}
+
+sub change_map {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;	
+	
+	return unless main->can_access($event->userhost);
+	
+	if(my $map = ($opts->{'m'} || shift @ARGV)) {
+		my @lines = _execute('-a', 'change_map', '-m', $map);
+		chomp(@lines);
+
+		if($? > 0) {
+			main->qmsg($chan, "Some error occured (@lines) ($?)");
+			return;
+		}
+
+		unless(scalar @lines) {
+			main->qmsg($chan, "Unable to switch (no reason)");
+			return;
+		}
+
+		main->qmsg($chan, "Return Status:");
+		for my $l (@lines) {
+			main->qmsg($chan, $l);
+		}
+	} else {
+		main->qmsg($chan, "Need map (-m)");
+	}
+}
+
+sub change_type {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;	
+	
+	return unless main->can_access($event->userhost);
+	
+	my %switches = (
+		'dm'	=> 'Tournament DeathMatch',
+		'ctf'	=> 'Capture the Flag',
+		'lms'	=> 'Last Man Standing'
+	);
+	
+	if(my $type = ($opts->{'t'}|| shift @ARGV)) {
+		if(defined $switches{lc $type}) {
+			$type = $switches{lc $type};
+		}
+		
+		my @lines = _execute('-a', 'change_type', '-t', $type);
+		chomp(@lines);
+
+		if($? > 0) {
+			main->qmsg($chan, "Some error occured (@lines) ($?)");
+			return;
+		}
+
+		unless(scalar @lines) {
+			main->qmsg($chan, "Unable to switch (no reason)");
+			return;
+		}
+
+		main->qmsg($chan, "Return Status:");
+		for my $l (@lines) {
+			main->qmsg($chan, $l);
+		}
+	} else {
+		main->qmsg($chan, "Need type (-t)");
+	}
+}
+
+sub say {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;
+	
+	return unless main->can_access($event->userhost);
+	
+	if(my $text = ($opts->{'T'} || join(' ', @ARGV))) {
+		my @lines = _execute('-a', 'say', '-T', $text);
+		chomp(@lines);
+
+		if($? > 0) {
+			main->qmsg($chan, "Some error occured (@lines) ($?)");
+			return;
+		}
+
+		unless(scalar @lines) {
+			main->qmsg($chan, "Unable to say (no reason)");
+			return;
+		}
+
+		for my $l (@lines) {
+			main->qmsg($chan, $l);
+		}
+	} else {
+		main->qmsg($chan, "Need text ([-T])");
+	}
+}
+
+sub restart_level {
+	my ($opts, $self, $event, $chan, $data, @to) = @_;	
+	
+	return unless main->can_access($event->userhost);
+	
+	my @lines = _execute('-a', 'restart_level');
+	chomp(@lines);
+
+	if($? > 0) {
+		main->qmsg($chan, "Some error occured (@lines) ($?)");
+		return;
+	}
+
+	unless(scalar @lines) {
+		main->qmsg($chan, "Unable to switch (no reason)");
+		return;
+	}
+
+	main->qmsg($chan, "Return Status:");
+	for my $l (@lines) {
+		main->qmsg($chan, $l);
+	}
+}
+
+sub _execute {
+	return execute($utctl, @_, '-s', $server, '-L', join(':', ($user, $pass)));
+	#return ($utctl, @_, '-s', $server, '-L', join(':', ($user, $pass)));
+}
+
+1;
+__END__
