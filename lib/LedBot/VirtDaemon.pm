@@ -3,7 +3,7 @@ package LedBot::VirtDaemon;
 # this allows virtual daemonizing stuff
 # works by use select() call on sockets
 # use LedBot::Loop if you want something to
-# get checked very loop (that isn't a socket)
+# get checked every loop (that isn't a socket)
 
 use strict;
 use IO::Handle;

@@ -56,7 +56,8 @@ sub events {
 sub loop {
 	my $self = shift;
 
-	for my $e ($self->events) {
+	for my $e ($self->events)
+	{
 		last if $e->[0]->(@{$e->[1]}, @_) == -1;
 	}
 }

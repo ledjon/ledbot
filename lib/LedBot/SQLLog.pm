@@ -107,15 +107,18 @@ sub getchan {
 sub getchanid {
 	my $chan = shift or return;
 
+	my $chanselect = $dbh->prepare(
+			"select chanid from channels where channame = ?",
+	) or die $dbh->errstr;
 	my $ret = $chanselect->execute($chan) or die $dbh->errstr;
 
-	if($ret =~ /^\d+$/) {
-		my $row = $chanselect->fetchrow_hashref;
-
+	if(my $row = $chanselect->fetchrow_hashref)
+	{
 		return ($row->{'chanid'} || 0);
-	} else {
-		$dbh->do("replace into channels (channame) values (?)", undef, $chan) or die $dbh->errstr;
-
+	}
+	else
+	{
+		$dbh->do("insert into channels (channame) values (?)", undef, $chan) or die $dbh->errstr;
 		return ($dbh->func('last_insert_rowid') || 0);
 	}
 }
